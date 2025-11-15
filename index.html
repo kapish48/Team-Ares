@@ -255,10 +255,6 @@
 </head>
 <body>
     <div class="container">
-        <div class="demo-bar">
-            <strong>Demo Prototype:</strong>
-            This system is for demonstration purposes only and is not HIPAA compliant in its current state. All data processing occurs over HTTPS with TLS encryption.
-        </div>
         <div class="header-card">
             <div>
                 <h1>PolicyPath</h1>
@@ -369,125 +365,158 @@
         </div>
     </div>
     <script>
-        document.getElementById('paForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
+    document.getElementById('paForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
 
-            const patientId = document.getElementById('patientId').value;
-            const priority = document.getElementById('priority').value;
-            const notes = document.getElementById('notes').value;
-            const webhookUrl = document.getElementById('webhookUrl').value;
+        const patientId = document.getElementById('patientId').value;
+        const priority = document.getElementById('priority').value;
+        const notes = document.getElementById('notes').value;
+        const webhookUrl = document.getElementById('webhookUrl').value;
 
-            const resultDiv = document.getElementById('result');
-            const resultDetails = document.getElementById('resultDetails');
+        const resultDiv = document.getElementById('result');
+        const resultDetails = document.getElementById('resultDetails');
 
-            // Show loading
-            resultDiv.style.display = 'block';
-            resultDiv.className = 'loading';
-            resultDiv.innerHTML = '<div class="spinner"></div><p>Processing request through AI engine...</p>';
-            resultDetails.innerHTML = '<div class="spinner"></div><p>Analyzing clinical data...</p>';
+        // Show loading
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'loading';
+        resultDiv.innerHTML = '<div class="spinner"></div><p>Processing request through AI engine...</p>';
+        resultDetails.innerHTML = '<div class="spinner"></div><p>Analyzing clinical data...</p>';
 
-            // Prepare payload
-            const payload = {
-                patient_id: patientId,
-                priority: priority,
-                notes: notes,
-                timestamp: new Date().toISOString()
-            };
+        // Prepare payload
+        const payload = {
+            patient_id: patientId,
+            priority: priority,
+            notes: notes,
+            timestamp: new Date().toISOString()
+        };
 
-            try {
-                const startTime = Date.now();
+        try {
+            const startTime = Date.now();
 
-                const response = await fetch(webhookUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(payload)
-                });
+            const response = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload)
+            });
 
-                const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
+            const processingTime = ((Date.now() - startTime) / 1000).toFixed(2);
 
-                if (response.ok) {
-                    const data = await response.json();
+            if (response.ok) {
+                let data = await response.json();
+                
+                // Handle if response is an array - take first item
+                if (Array.isArray(data)) {
+                    data = data[0];
+                }
 
-                    // Extract actual data from n8n response
-                    const decision = data.decision || data.ai_analysis?.preliminary_assessment || "UNKNOWN";
-                    const confidence = data.confidence || data.ai_analysis?.confidence_score || 0;
-                    const reasoning = data.ai_analysis?.reasoning || "AI analysis in progress";
+                // Extract data - handle nested structure
+                const output = data.output || data;
+                const decision = output.final_decision || output.decision || data.decision || "UNKNOWN";
+                const confidence = output.confidence || data.confidence || 0;
+                const reasoning = output.reasoning || data.reasoning || "No reasoning provided";
+                const criteriaMet = output.criteria_met || [];
+                const criteriaMissing = output.criteria_missing || [];
 
-                    // Determine decision class
-                    let decisionClass = 'success';
-                    let decisionIcon = '✅';
-                    let decisionText = 'APPROVED';
+                // Determine decision class
+                let decisionClass = 'success';
+                let decisionIcon = '✅';
+                let decisionText = 'APPROVED';
 
-                    if (decision.toLowerCase().includes('denied')) {
-                        decisionClass = 'error';
-                        decisionIcon = '❌';
-                        decisionText = 'DENIED';
-                    } else if (decision.toLowerCase().includes('review') || confidence < 90) {
-                        decisionClass = 'warning';
-                        decisionIcon = '⚠';
-                        decisionText = 'NEEDS REVIEW';
-                    } else if (decision.toLowerCase().includes('approved')) {
-                        decisionClass = 'success';
-                        decisionIcon = '✅';
-                        decisionText = 'APPROVED';
-                    }
+                if (decision === 'DENIED') {
+                    decisionClass = 'error';
+                    decisionIcon = '❌';
+                    decisionText = 'DENIED';
+                } else if (decision === 'NEEDS_REVIEW' || confidence < 90) {
+                    decisionClass = 'warning';
+                    decisionIcon = '⚠️';
+                    decisionText = 'NEEDS REVIEW';
+                } else if (decision === 'APPROVED') {
+                    decisionClass = 'success';
+                    decisionIcon = '✅';
+                    decisionText = 'APPROVED';
+                }
 
-                    // Show result summary
-                    resultDiv.className = decisionClass;
-                    resultDiv.innerHTML = `
-                        <h3>${decisionIcon} Request ${decisionText}</h3>
-                        <p><strong>Patient ID:</strong> ${patientId}</p>
-                        <p><strong>Processing Time:</strong> ${processingTime} seconds</p>
-                        <p><strong>Confidence Score:</strong> ${confidence}%</p>
-                        <p><strong>Request ID:</strong> ${data.request_id || new Date().getTime()}_${patientId}</p>
-                    `;
+                // Show result summary
+                resultDiv.className = decisionClass;
+                resultDiv.innerHTML = `
+                    <h3>${decisionIcon} Request ${decisionText}</h3>
+                    <p><strong>Patient ID:</strong> ${patientId}</p>
+                    <p><strong>Processing Time:</strong> ${processingTime} seconds</p>
+                    <p><strong>Confidence Score:</strong> ${confidence}%</p>
+                `;
 
-                    // Show detailed results with ACTUAL AI data
-                    resultDetails.innerHTML = `
-                        <h3 style="color: ${decisionClass === 'success' ? '#28a745' : decisionClass === 'error' ? '#dc3545' : '#ffc107'}; margin-bottom: 15px;">
-                            Decision: ${decisionText}
-                        </h3>
-                        <p><strong>Confidence:</strong> ${confidence}%</p>
-                        ${data.ai_analysis ? `
-                            <div style="margin-top: 15px;">
-                                <p><strong>Diagnosis Code:</strong> ${data.ai_analysis.diagnosis_code || 'N/A'}</p>
-                                <p><strong>Genomic Markers:</strong> ${data.ai_analysis.genomic_markers_extracted || 'N/A'}</p>
-                                <p><strong>Prior Treatments:</strong> ${data.ai_analysis.prior_treatments_list || 'N/A'}</p>
-                            </div>
-                        ` : ''}
-                        <p><strong>AI Reasoning:</strong></p>
-                        <p style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 10px;">
+                // Show detailed results with ACTUAL AI data
+                resultDetails.innerHTML = `
+                    <h3 style="color: ${decisionClass === 'success' ? '#28a745' : decisionClass === 'error' ? '#dc3545' : '#ffc107'}; margin-bottom: 15px;">
+                        Decision: ${decisionText}
+                    </h3>
+                    <p><strong>Confidence:</strong> ${confidence}%</p>
+                    
+                    ${criteriaMet.length > 0 ? `
+                        <div style="margin-top: 15px; background: #d4edda; padding: 12px; border-radius: 6px;">
+                            <p style="font-weight: 600; margin-bottom: 8px;">✅ Criteria Met:</p>
+                            <ul style="margin-left: 20px; margin-top: 5px;">
+                                ${criteriaMet.map(c => `<li>${c}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    
+                    ${criteriaMissing.length > 0 ? `
+                        <div style="margin-top: 15px; background: #f8d7da; padding: 12px; border-radius: 6px;">
+                            <p style="font-weight: 600; margin-bottom: 8px; color: #721c24;">❌ Criteria Missing:</p>
+                            <ul style="margin-left: 20px; margin-top: 5px; color: #721c24;">
+                                ${criteriaMissing.map(c => `<li>${c}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    
+                    <div style="margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 6px; border-left: 4px solid #667eea;">
+                        <p style="font-weight: 600; margin-bottom: 10px;">🤖 AI Clinical Reasoning:</p>
+                        <p style="line-height: 1.6; color: #333;">
                             ${reasoning}
                         </p>
-                        <hr style="margin: 20px 0;">
-                        <h4>Raw n8n Response:</h4>
-                        <pre style="background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 12px; max-height: 300px; overflow-y: auto;">${JSON.stringify(data, null, 2)}</pre>
-                    `;
-                } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-            } catch (error) {
-                resultDiv.className = 'error';
-                resultDiv.innerHTML = `
-                    <h3>❌ Connection Error</h3>
-                    <p>${error.message}</p>
-                    <p style="margin-top: 10px;">
-                        <strong>Troubleshooting:</strong><br>
-                        • Make sure n8n is running<br>
-                        • Check the workflow is ACTIVE (toggle switch ON)<br>
-                        • Verify webhook URL: ${document.getElementById('webhookUrl').value}<br>
-                        • Check n8n has "Respond to Webhook" node at the end
-                    </p>
+                    </div>
+                    
+                    <hr style="margin: 20px 0; border: none; border-top: 1px solid #e0e0e0;">
+                    <details style="margin-top: 15px;">
+                        <summary style="cursor: pointer; font-weight: 600; padding: 10px; background: #e9ecef; border-radius: 5px; user-select: none;">
+                            👁️ View Raw n8n Response
+                        </summary>
+                        <pre style="background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 12px; max-height: 300px; overflow-y: auto; margin-top: 10px; border: 1px solid #dee2e6;">${JSON.stringify(data, null, 2)}</pre>
+                    </details>
                 `;
-                resultDetails.innerHTML = `
-                    <p style="color: #999; text-align: center; padding: 40px;">
-                        Error occurred. Please check the connection and try again.
-                    </p>
-                `;
+
+            } else {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-        });
-    </script>
+
+        } catch (error) {
+            resultDiv.className = 'error';
+            resultDiv.innerHTML = `
+                <h3>❌ Connection Error</h3>
+                <p><strong>Error:</strong> ${error.message}</p>
+                <div style="margin-top: 15px; padding: 12px; background: #fff3cd; border-radius: 6px; border-left: 4px solid #ffc107;">
+                    <p style="font-weight: 600; margin-bottom: 8px;">🔧 Troubleshooting Steps:</p>
+                    <ul style="margin-left: 20px; line-height: 1.8;">
+                        <li>Verify n8n is running on <code>localhost:5678</code></li>
+                        <li>Check workflow is <strong>ACTIVE</strong> (toggle switch ON)</li>
+                        <li>Confirm webhook URL: <code>${document.getElementById('webhookUrl').value}</code></li>
+                        <li>Ensure "Respond to Webhook" node exists at workflow end</li>
+                    </ul>
+                </div>
+            `;
+
+            resultDetails.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #999;">
+                    <p style="font-size: 3em; margin-bottom: 10px;">⚠️</p>
+                    <p>Unable to connect to n8n workflow</p>
+                    <p style="margin-top: 10px; font-size: 0.9em;">Please check the connection and try again</p>
+                </div>
+            `;
+        }
+    });
+</script>
 </body>
 </html>
